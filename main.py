@@ -88,11 +88,12 @@ class OpenAPIToPython:
                 response_description = get_response_description(method_info)
                 return_type = get_return_type(method_info['responses'])
                 data_type = get_data_type(method_info)
+                has_multipart = check_has_multipart(method_info)
 
                 self.method_codes.append(
                     generate_method_code(
                         method_name, method_description, parameters, method, tags, response_description, return_type,
-                        path, data_type
+                        path, data_type, has_multipart
                     )
                 )
 
@@ -106,11 +107,14 @@ class OpenAPIToPython:
                        "            if v is None:\n" \
                        "                del optional_params[k]\n" \
                        "        params_str = '&'.join([f'{k}={v}' for k, v in {**params, **optional_params}.items()])\n" \
-                       "        return f'{self._base_url}/{path}?{params_str}'\n\n"
+                       "        return f'{self._base_url}/{path}?{params_str}'\n"
 
         with open('output/api_interface.py', 'w') as f:
-            f.write("from helpers import enums\n")
-            f.write("from helpers import data_classes\n\n\n")
+            f.write(
+                "from helpers import enums\n"
+                "from dataclasses import asdict, is_dataclass\n"
+                "from helpers import data_classes\n\n\n"
+            )
             f.write(class_header)
             for i, method_code in enumerate(self.method_codes):
                 if i < len(self.method_codes):

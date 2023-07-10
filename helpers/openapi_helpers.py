@@ -49,18 +49,33 @@ def get_data_type(method_info):
     return None
 
 
+def check_has_multipart(method_info):
+    if 'requestBody' in method_info and 'content' in method_info['requestBody']:
+        if 'multipart/form-data' in method_info['requestBody']['content']:
+            return True
+
+    return False
+
+
 def generate_method_code(method_name, method_description, parameters, method, tags, response_description, return_type,
-                         path, data_type):
+                         path, data_type, has_multipart):
     code = f"    def {method_name}(\n"
     code += f"        self,\n"
     for param in parameters:
+        param_name = param[0]
+        param_type = param[2]
+        if param_type.startswith("enums."):
+            param_type = f"{param_type} | type({param_type}.value)"
+        elif param_type.startswith("data_classes."):
+            param_type = f"{param_type} | dict"
         if param[3] is not None:
-            code += f"        {to_snake_case(param[0])}: {param[2]} | None = None,\n"
-        else:
-            code += f"        {to_snake_case(param[0])}: {param[2]},\n"
+            param_type = f"{param_type} | None = None"
+        code += f"        {to_snake_case(param_name)}: {param_type},\n"
 
     if data_type is not None:
         code += f"        data: {data_type} | None = None,\n"
+    if has_multipart:
+        code += f"        files: list | None = None,\n"
     code = code.rstrip(',\n')
     code += "\n    ):\n"
     code += f"        \"\"\"\n"
@@ -71,28 +86,68 @@ def generate_method_code(method_name, method_description, parameters, method, ta
         code += f"        :param {to_snake_case(param[0])}: {param[1]}\n"
     if data_type is not None:
         code += f"        :param data: Request body data\n"
+    if has_multipart:
+        code += f"        :param files: List of file paths\n"
     code += f"        :return: {response_description}\n"
     code += f"        :rtype: {return_type}\n"
     code += f"        \"\"\"\n"
     url_path = '/'.join([part for part in path.strip('/').split('/')[2:]])
+
+    # params
     params = [param for param in parameters if param[3] is None]
-    params_str = ',\n                '.join([f"'{param[0]}': {to_snake_case(param[0])}" for param in params])
+    formatted_param_strs = []
+    for param in params:
+        param_key = param[0]
+        param_value = to_snake_case(param[0])
+        param_type = param[2]
+        if param_type.startswith("enums."):
+            param_value = f"                {param_type}({param_value}).value\n" \
+                          f"                if isinstance({param_value}, {param_type})\n" \
+                          f"                else {param_value})\n"
+        formatted_param_str = f"'{param_key}': {param_value}"
+        formatted_param_strs.append(formatted_param_str)
+
+    params_str = ',\n                '.join(formatted_param_strs)
     if len(params) > 0:
         params_str = f"\n                {params_str}\n            "
+
+    # optional params
     optional_params = [param for param in parameters if param[3] is not None]
-    optional_params_str = ',\n                '.join(
-        [f"'{param[0]}': {to_snake_case(param[0])}" for param in optional_params])
+    formatted_optional_param_strs = []
+
+    for param in optional_params:
+        param_key = param[0]
+        param_value = to_snake_case(param[0])
+        param_type = param[2]
+        if param_type.startswith("enums."):
+            param_value = f"\n                    {param_type}({param_value}).value\n" \
+                          f"                    if isinstance({param_value}, {param_type})\n" \
+                          f"                    else {param_value}"
+        formatted_optional_param_str = f"'{param_key}': {param_value}"
+        formatted_optional_param_strs.append(formatted_optional_param_str)
+
+    optional_params_str = ',\n                '.join(formatted_optional_param_strs)
     if len(optional_params) > 0:
         optional_params_str = f"\n                {optional_params_str}\n            "
+
     code += f"        url = self._url(\n"
     code += f"            '{url_path}',\n"
     code += f"            {{{params_str}}},\n"
     code += f"            {{{optional_params_str}}}\n"
     code += f"        )\n"
-    if data_type is not None:
-        code += f"        return self._session.{method}(url, data=data)\n"
-    else:
-        code += f"        return self._session.{method}(url)\n"
+
+    url_str = "url"
+    data_param_str = None
+    if data_type:
+        if data_type.startswith("data_classes."):
+            data_param_str = "data=asdict(data) if is_dataclass(data) else data"
+        else:
+            data_param_str = "data=data"
+
+    files_param_str = "files=files" if has_multipart else None
+    should_return_str = "" if return_type == "None" else "return "
+    session_params = ", ".join(item for item in [url_str, data_param_str, files_param_str] if item is not None)
+    code += f"        {should_return_str}self._session.{method}({session_params})\n"
     return code
 
 

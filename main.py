@@ -6,6 +6,7 @@ from helpers.openapi_helpers import *
 
 class OpenAPIToPython:
     def __init__(self, openapi_json_path):
+        self.support_pandas = False
         self.method_codes = []
         self.enums = {}
         self.data_classes = {}
@@ -93,7 +94,7 @@ class OpenAPIToPython:
                 self.method_codes.append(
                     generate_method_code(
                         method_name, method_description, parameters, method, tags, response_description, return_type,
-                        path, data_type, has_multipart
+                        path, data_type, has_multipart, self.support_pandas
                     )
                 )
 
@@ -103,17 +104,20 @@ class OpenAPIToPython:
                        "        self._session = session\n" \
                        "        self._base_url = base_url\n\n" \
                        "    def _url(self, path, params, optional_params):\n" \
-                       "        for k, v in optional_params:\n" \
-                       "            if v is None:\n" \
-                       "                del optional_params[k]\n" \
-                       "        params_str = '&'.join([f'{k}={v}' for k, v in {**params, **optional_params}.items()])\n" \
+                       "        optional_params = {k: urllib.parse.quote(v) " \
+                       "for k, v in optional_params.items() if v is not None}\n" \
+                       "        params_str = '&'.join([f'{k}={urllib.parse.quote(v)}' " \
+                       "for k, v in {**params, **optional_params}.items()])\n" \
                        "        return f'{self._base_url}/{path}?{params_str}'\n"
 
         with open('output/api_interface.py', 'w') as f:
+            import_pandas_str = "import pandas as pd\n" if self.support_pandas else ""
             f.write(
                 "from helpers import enums\n"
                 "from dataclasses import asdict, is_dataclass\n"
-                "from helpers import data_classes\n\n\n"
+                "from helpers import data_classes\n"
+                f"{import_pandas_str}"
+                "\n\n"
             )
             f.write(class_header)
             for i, method_code in enumerate(self.method_codes):
@@ -124,4 +128,5 @@ class OpenAPIToPython:
 
 if __name__ == "__main__":
     openapi_to_python = OpenAPIToPython('openapi.json')
+    openapi_to_python.support_pandas = True
     openapi_to_python.generate_python_code()

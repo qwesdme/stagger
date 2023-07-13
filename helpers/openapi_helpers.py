@@ -58,37 +58,50 @@ def check_has_multipart(method_info):
 
 
 def generate_method_code(method_name, method_description, parameters, method, tags, response_description, return_type,
-                         path, data_type, has_multipart):
+                         path, data_type, has_multipart, support_pandas):
+    # method definition
     code = f"    def {method_name}(\n"
-    code += f"        self,\n"
+    code += f"            self,\n"
     for param in parameters:
         param_name = param[0]
         param_type = param[2]
         if param_type.startswith("enums."):
-            param_type = f"{param_type} | type({param_type}.value)"
+            param_type = f"{param_type} | str "  # todo: get enum data type
         elif param_type.startswith("data_classes."):
             param_type = f"{param_type} | dict"
         if param[3] is not None:
             param_type = f"{param_type} | None = None"
-        code += f"        {to_snake_case(param_name)}: {param_type},\n"
+        code += f"            {to_snake_case(param_name)}: {param_type},\n"
 
     if data_type is not None:
-        code += f"        data: {data_type} | None = None,\n"
+        code += f"            data: {data_type} | None = None,\n"
     if has_multipart:
-        code += f"        files: list | None = None,\n"
+        code += f"            files: list | None = None,\n"
     code = code.rstrip(',\n')
     code += "\n    ):\n"
+
+    # method summary
     code += f"        \"\"\"\n"
     code += f"        {method_description}\n"
     code += f"        Request method: {method}\n"
     code += f"        Tags: {tags}\n\n"
+
+    # param descriptions
     for param in parameters:
         code += f"        :param {to_snake_case(param[0])}: {param[1]}\n"
     if data_type is not None:
         code += f"        :param data: Request body data\n"
     if has_multipart:
         code += f"        :param files: List of file paths\n"
+
+    # return descriptions
     code += f"        :return: {response_description}\n"
+    pandas_return_type = None
+    if support_pandas:
+        if return_type.startswith("list[data_classes.") or return_type.startswith("list[enums."):
+            pandas_return_type = return_type = "pd.DataFrame"
+        elif return_type.startswith("data_classes."):
+            pandas_return_type = return_type = "pd.Series"
     code += f"        :rtype: {return_type}\n"
     code += f"        \"\"\"\n"
     url_path = '/'.join([part for part in path.strip('/').split('/')[2:]])
@@ -147,7 +160,8 @@ def generate_method_code(method_name, method_description, parameters, method, ta
     files_param_str = "files=files" if has_multipart else None
     should_return_str = "" if return_type == "None" else "return "
     session_params = ", ".join(item for item in [url_str, data_param_str, files_param_str] if item is not None)
-    code += f"        {should_return_str}self._session.{method}({session_params})\n"
+    pandas_return_str = "" if pandas_return_type is None else f"_{to_snake_case(pandas_return_type.split('.')[-1])}"
+    code += f"        {should_return_str}self._session.{method}{pandas_return_str}({session_params})\n"
     return code
 
 
@@ -183,13 +197,32 @@ def get_parameters(method_info):
     return sorted(parameters, key=lambda x: x[3] is not None)
 
 
+def get_list_item_type(items):
+    if 'type' in items:
+        return f"list[{get_python_type(items['type'])}]"
+    else:
+        if '$ref' in items:
+            ref_parts = items['$ref'].split('.')
+            if len(ref_parts) > 1 and ref_parts[-2] == 'Enums':
+                enum_name = ref_parts[-1]
+                return f"list[enums.{enum_name}]"
+            else:
+                class_name = ref_parts[-1]
+                return f"list[data_classes.{class_name}]"
+        else:
+            return 'list'
+
+
 def get_return_type(responses):
     for status, response_info in responses.items():
         if 'content' in response_info:
             for media_type, media_info in response_info['content'].items():
                 if 'schema' in media_info:
                     if 'type' in media_info['schema']:
-                        return get_python_type(media_info['schema']['type'])
+                        return_type = get_python_type(media_info['schema']['type'])
+                        if return_type == 'list':
+                            return_type = get_list_item_type(media_info['schema']['items'])
+                        return return_type
                     elif '$ref' in media_info['schema']:
                         return get_ref_name(media_info)
     return 'None'

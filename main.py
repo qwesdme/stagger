@@ -104,18 +104,18 @@ class OpenAPIToPython:
                        "        self._session = session\n" \
                        "        self._base_url = base_url\n\n" \
                        "    def _url(self, path, params, optional_params):\n" \
-                       "        optional_params = {k: urllib.parse.quote(v) " \
+                       "        optional_params = {k: quote(v) " \
                        "for k, v in optional_params.items() if v is not None}\n" \
-                       "        params_str = '&'.join([f'{k}={urllib.parse.quote(v)}' " \
+                       "        params_str = '&'.join([f'{k}={quote(v)}' " \
                        "for k, v in {**params, **optional_params}.items()])\n" \
                        "        return f'{self._base_url}/{path}?{params_str}'\n"
 
         with open('output/api_interface.py', 'w') as f:
             import_pandas_str = "import pandas as pd\n" if self.support_pandas else ""
             f.write(
-                "from helpers import enums\n"
                 "from dataclasses import asdict, is_dataclass\n"
-                "from helpers import data_classes\n"
+                "from urllib.parse import quote\n\n"
+                "from helpers import enums, data_classes\n"
                 f"{import_pandas_str}"
                 "\n\n"
             )

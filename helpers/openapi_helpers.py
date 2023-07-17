@@ -12,7 +12,8 @@ def get_python_type(openapi_type):
         'number': 'float',
         'array': 'list',
         'boolean': 'bool',
-    }.get(openapi_type, 'Unknown')
+        'object': 'object',
+    }.get(openapi_type, openapi_type)
 
 
 def to_snake_case(name):
@@ -43,8 +44,6 @@ def get_data_type(method_info):
             elif '$ref' in method_info['requestBody']['content']['application/json']['schema']:
                 ref = method_info['requestBody']['content']['application/json']['schema']['$ref']
                 class_name = f"data_classes.{ref.split('.')[-1]}"
-                #                 properties = self.api_data['components']['schemas'][class_name]['properties']
-                #                 generate_data_class(class_name, properties)
                 return class_name
     return None
 
@@ -59,6 +58,14 @@ def check_has_multipart(method_info):
 
 def generate_method_code(method_name, method_description, parameters, method, tags, response_description, return_type,
                          path, data_type, has_multipart, support_pandas):
+
+    pandas_return_type = None
+    if support_pandas:
+        if return_type.startswith("list[data_classes.") or return_type.startswith("list[enums."):
+            pandas_return_type = return_type = "pd.DataFrame"
+        elif return_type.startswith("data_classes."):
+            pandas_return_type = return_type = "pd.Series"
+
     # method definition
     code = f"    def {method_name}(\n"
     code += f"            self,\n"
@@ -66,7 +73,7 @@ def generate_method_code(method_name, method_description, parameters, method, ta
         param_name = param[0]
         param_type = param[2]
         if param_type.startswith("enums."):
-            param_type = f"{param_type} | str "  # todo: get enum data type
+            param_type = f"{param_type} | str"  # todo: get enum data type
         elif param_type.startswith("data_classes."):
             param_type = f"{param_type} | dict"
         if param[3] is not None:
@@ -78,7 +85,7 @@ def generate_method_code(method_name, method_description, parameters, method, ta
     if has_multipart:
         code += f"            files: list | None = None,\n"
     code = code.rstrip(',\n')
-    code += "\n    ):\n"
+    code += f"\n    ) -> {return_type}:\n"
 
     # method summary
     code += f"        \"\"\"\n"
@@ -96,12 +103,6 @@ def generate_method_code(method_name, method_description, parameters, method, ta
 
     # return descriptions
     code += f"        :return: {response_description}\n"
-    pandas_return_type = None
-    if support_pandas:
-        if return_type.startswith("list[data_classes.") or return_type.startswith("list[enums."):
-            pandas_return_type = return_type = "pd.DataFrame"
-        elif return_type.startswith("data_classes."):
-            pandas_return_type = return_type = "pd.Series"
     code += f"        :rtype: {return_type}\n"
     code += f"        \"\"\"\n"
     url_path = '/'.join([part for part in path.strip('/').split('/')[2:]])
@@ -160,8 +161,12 @@ def generate_method_code(method_name, method_description, parameters, method, ta
     files_param_str = "files=files" if has_multipart else None
     should_return_str = "" if return_type == "None" else "return "
     session_params = ", ".join(item for item in [url_str, data_param_str, files_param_str] if item is not None)
-    pandas_return_str = "" if pandas_return_type is None else f"_{to_snake_case(pandas_return_type.split('.')[-1])}"
-    code += f"        {should_return_str}self._session.{method}{pandas_return_str}({session_params})\n"
+    session_return_type = "" \
+        if return_type == "None" \
+        else f"_{return_type.split('[')[0]}" \
+        if pandas_return_type is None \
+        else f"_{to_snake_case(pandas_return_type.split('.')[-1])}"
+    code += f"        {should_return_str}self._session.{method}{session_return_type}({session_params})\n"
     return code
 
 
